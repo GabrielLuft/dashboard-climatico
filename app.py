@@ -48,6 +48,7 @@ def carregar_dados(sheet_id, gid_map):
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
         try:
             df = pd.read_csv(url)
+            df.columns = df.columns.str.strip()  # Remove espaços extras
             df['Estacao'] = estacao
             df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
             df['Hora'] = pd.to_datetime(df['Hora'], format='%H:%M', errors='coerce').dt.time
@@ -68,17 +69,18 @@ if df.empty:
 
 st.sidebar.title("⚙️ Configurações do Dashboard")
 
+# Garantir variáveis que existem no DataFrame
+variaveis_disponiveis = [col for col in ["Temperatura", "Umidade", "Chuva", "Radiação"] if col in df.columns]
+variaveis_selecionadas = st.sidebar.multiselect(
+    "📊 Variáveis para análise:",
+    options=variaveis_disponiveis,
+    default=variaveis_disponiveis[:2]
+)
+
 estacoes_selecionadas = st.sidebar.multiselect(
     "📍 Selecione as Estações:",
     options=list(GID_MAP.keys()),
     default=list(GID_MAP.keys())
-)
-
-variaveis_disponiveis = list(VARS_DESCRICAO.keys())
-variaveis_selecionadas = st.sidebar.multiselect(
-    "📊 Variáveis para análise:",
-    options=variaveis_disponiveis,
-    default=["Temperatura", "Umidade"]
 )
 
 data_min = df['Data'].min().date()
@@ -115,7 +117,6 @@ st.markdown(
     """
 )
 
-# CORREÇÃO AQUI: colunas dinâmicas para métricas
 cols = st.columns(len(variaveis_selecionadas))
 for col, var in zip(cols, variaveis_selecionadas):
     media = df_filtrado[var].mean()
@@ -158,8 +159,8 @@ st.plotly_chart(fig_line, use_container_width=True)
 st.subheader("🌡️ Mapa Regional com Interpolação de Calor")
 
 df_media = df_filtrado.groupby('Estacao')[variaveis_selecionadas].mean().reset_index()
-df_media['lat'] = df_media['Estacao'].map(lambda x: COORDS[x][0])
-df_media['lon'] = df_media['Estacao'].map(lambda x: COORDS[x][1])
+df_media['lat'] = df_media['Estacao'].map(lambda x: COORDS.get(x, (None, None))[0])
+df_media['lon'] = df_media['Estacao'].map(lambda x: COORDS.get(x, (None, None))[1])
 
 param_mapa = st.selectbox("Escolha o parâmetro para o mapa:", variaveis_selecionadas)
 
@@ -198,7 +199,7 @@ fig_heatmap.add_scatter(
 fig_heatmap.update_layout(
     xaxis_title="Latitude",
     yaxis_title="Longitude",
-    coloraxis_colorbar=dict(title=VARS_DESCRICAO[param_mapa])
+    coloraxis_colorbar=dict(title=VARS_DESCRICAO.get(param_mapa, param_mapa))
 )
 
 st.plotly_chart(fig_heatmap, use_container_width=True)
