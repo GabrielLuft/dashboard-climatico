@@ -14,14 +14,20 @@ GID_MAP = {
     "Bento Gonçalves": "1136868112",
     "Caxias do Sul": "1948457634",
     "Garibaldi": "651276718",
-    "Farroupilha": "1776247071"
+    "Farroupilha": "1776247071",
+    "Porto Alegre": "1354357502",
+    "Pelotas": "1406762959",
+    "Santa Maria": "1890374975"
 }
 
 COORDS = {
     "Bento Gonçalves": (-29.1667, -51.5167),
     "Caxias do Sul": (-29.1668, -51.1794),
     "Garibaldi": (-29.2597, -51.5336),
-    "Farroupilha": (-29.2222, -51.3475)
+    "Farroupilha": (-29.2222, -51.3475),
+    "Porto Alegre": (-30.0346, -51.2177),
+    "Pelotas": (-31.7710, -52.3426),
+    "Santa Maria": (-29.6842, -53.8069)
 }
 
 # -------------------------------
@@ -88,7 +94,7 @@ if df_filtrado.empty:
 # -------------------------------
 # 🧠 TÍTULO E MÉTRICAS
 # -------------------------------
-st.title("🌤️ Dashboard Climático da Serra Gaúcha")
+st.title("🌤️ Dashboard Climático da Serra Gaúcha e RS")
 st.caption("Atualizado automaticamente com dados da planilha do Google.")
 
 with st.container():
@@ -139,7 +145,7 @@ fig_mapa = px.scatter_mapbox(
     size=param_mapa,
     color=param_mapa,
     hover_name="Estacao",
-    zoom=8,
+    zoom=6.5,
     size_max=35,
     mapbox_style="open-street-map",
     color_continuous_scale=px.colors.sequential.Plasma,
