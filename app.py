@@ -20,14 +20,20 @@ GID_MAP = {
     "Bento Gonçalves": "1136868112",
     "Caxias do Sul": "1948457634",
     "Garibaldi": "651276718",
-    "Farroupilha": "1776247071"
+    "Farroupilha": "1776247071",
+    "Porto Alegre": "1354357502",
+    "Pelotas": "1406762959",
+    "Santa Maria": "1890374975"
 }
 
 COORDS = {
     "Bento Gonçalves": (-29.1667, -51.5167),
     "Caxias do Sul": (-29.1668, -51.1794),
     "Garibaldi": (-29.2597, -51.5336),
-    "Farroupilha": (-29.2222, -51.3475)
+    "Farroupilha": (-29.2222, -51.3475),
+    "Porto Alegre": (-30.0346, -51.2177),
+    "Pelotas": (-31.7710, -52.3426),
+    "Santa Maria": (-29.6842, -53.8069)
 }
 
 VARS_DESCRICAO = {
@@ -94,6 +100,12 @@ data_fim = st.sidebar.date_input("Data Fim", data_max, min_value=data_min, max_v
 hora_inicio = st.sidebar.slider("Hora Início", 0, 23, 0)
 hora_fim = st.sidebar.slider("Hora Fim", 0, 23, 23)
 
+# Média móvel
+usar_media_movel = st.sidebar.checkbox("Aplicar média móvel na série temporal?", value=False)
+window_size = 3
+if usar_media_movel:
+    window_size = st.sidebar.slider("Tamanho da janela da média móvel", min_value=2, max_value=10, value=3)
+
 # Filtro aplicado
 df_filtrado = df[
     (df['Estacao'].isin(estacoes_selecionadas)) &
@@ -117,30 +129,36 @@ st.markdown(
 )
 
 # Métricas principais - layout com cores e ícones
-with st.container():
-    col1, col2, col3, col4 = st.columns(len(variaveis_selecionadas))
-    for col, var in zip([col1, col2, col3, col4], variaveis_selecionadas):
-        media = df_filtrado[var].mean()
-        minimo = df_filtrado[var].min()
-        maximo = df_filtrado[var].max()
-        col.metric(
-            label=f"📈 {var}",
-            value=f"{media:.2f}",
-            delta=f"Min: {minimo:.1f} | Max: {maximo:.1f}"
-        )
+cols = st.columns(len(variaveis_selecionadas))
+for col, var in zip(cols, variaveis_selecionadas):
+    media = df_filtrado[var].mean()
+    minimo = df_filtrado[var].min()
+    maximo = df_filtrado[var].max()
+    col.metric(
+        label=f"📈 {var}",
+        value=f"{media:.2f}",
+        delta=f"Min: {minimo:.1f} | Max: {maximo:.1f}"
+    )
 
 # --------- Série Temporal com múltiplas variáveis ---------
 st.subheader("📅 Evolução Temporal das Variáveis Selecionadas")
 
+df_plot = df_filtrado.copy()
+
+if usar_media_movel:
+    for var in variaveis_selecionadas:
+        df_plot[var] = df_plot.groupby('Estacao')[var].transform(lambda x: x.rolling(window=window_size, min_periods=1).mean())
+
 fig_line = px.line(
-    df_filtrado,
+    df_plot,
     x='DataHora',
     y=variaveis_selecionadas,
     color='Estacao',
     template="plotly_dark",
     markers=True,
-    title="Séries Temporais das Variáveis por Estação"
+    title="Séries Temporais com Média Móvel" if usar_media_movel else "Séries Temporais das Variáveis por Estação"
 )
+
 fig_line.update_layout(
     hovermode="x unified",
     legend_title_text="Estação",
@@ -148,32 +166,29 @@ fig_line.update_layout(
     yaxis_title="Valor",
     margin=dict(t=50, b=40, l=40, r=20)
 )
+
 st.plotly_chart(fig_line, use_container_width=True)
 
 # --------- Mapa Interpolado (Heatmap) ---------
 st.subheader("🌡️ Mapa Regional com Interpolação de Calor")
 
-# Preparar dados para interpolação média no período
 df_media = df_filtrado.groupby('Estacao')[variaveis_selecionadas].mean().reset_index()
 df_media['lat'] = df_media['Estacao'].map(lambda x: COORDS[x][0])
 df_media['lon'] = df_media['Estacao'].map(lambda x: COORDS[x][1])
 
 param_mapa = st.selectbox("Escolha o parâmetro para o mapa:", variaveis_selecionadas)
 
-# Geração de grade para interpolação
-num_grid = 100  # mais denso para melhor suavização
+num_grid = 100
 lat_min, lat_max = df_media['lat'].min(), df_media['lat'].max()
 lon_min, lon_max = df_media['lon'].min(), df_media['lon'].max()
 
 grid_lat, grid_lon = np.mgrid[lat_min:lat_max:complex(num_grid), lon_min:lon_max:complex(num_grid)]
 
-# Interpolação com griddata
 points = np.array([(lat, lon) for lat, lon in zip(df_media['lat'], df_media['lon'])])
 values = df_media[param_mapa].values
 
 grid_z = griddata(points, values, (grid_lat, grid_lon), method='cubic')
 
-# Criar figura heatmap com plotly
 fig_heatmap = px.imshow(
     grid_z.T,
     origin='lower',
@@ -185,7 +200,6 @@ fig_heatmap = px.imshow(
     title=f"Mapa de Calor Interpolado - {param_mapa}"
 )
 
-# Sobrepor pontos das estações
 fig_heatmap.add_scatter(
     x=df_media['lat'],
     y=df_media['lon'],
