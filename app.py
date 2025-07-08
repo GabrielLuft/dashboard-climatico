@@ -5,7 +5,6 @@ import numpy as np
 from datetime import time
 from scipy.interpolate import griddata
 
-# Configurações iniciais do app
 st.set_page_config(
     page_title="🌦️ Dashboard Climático Avançado | Serra Gaúcha & RS",
     layout="wide",
@@ -13,7 +12,6 @@ st.set_page_config(
     page_icon="🌤️"
 )
 
-# --------- Constantes e Configurações ---------
 SHEET_ID = "1V9s2JgyDUBitQ9eChSqrKQJ5GFG4NKHO_EOzHPm4dgA"
 
 GID_MAP = {
@@ -43,7 +41,6 @@ VARS_DESCRICAO = {
     "Radiação": "Radiação solar (W/m²)"
 }
 
-# --------- Função para carregar dados ---------
 @st.cache_data(ttl=600)
 def carregar_dados(sheet_id, gid_map):
     dfs = []
@@ -63,25 +60,20 @@ def carregar_dados(sheet_id, gid_map):
     else:
         return pd.DataFrame()
 
-# --------- Carregar dados ---------
-with st.spinner("🔄 Carregando dados das estações..."):
-    df = carregar_dados(SHEET_ID, GID_MAP)
+df = carregar_dados(SHEET_ID, GID_MAP)
 
 if df.empty:
     st.error("❌ Nenhum dado disponível. Verifique os GIDs e o acesso à planilha.")
     st.stop()
 
-# --------- Sidebar: Filtros ---------
 st.sidebar.title("⚙️ Configurações do Dashboard")
 
-# Seleção de estações
 estacoes_selecionadas = st.sidebar.multiselect(
     "📍 Selecione as Estações:",
     options=list(GID_MAP.keys()),
     default=list(GID_MAP.keys())
 )
 
-# Variáveis
 variaveis_disponiveis = list(VARS_DESCRICAO.keys())
 variaveis_selecionadas = st.sidebar.multiselect(
     "📊 Variáveis para análise:",
@@ -89,24 +81,20 @@ variaveis_selecionadas = st.sidebar.multiselect(
     default=["Temperatura", "Umidade"]
 )
 
-# Período
 data_min = df['Data'].min().date()
 data_max = df['Data'].max().date()
 
 data_inicio = st.sidebar.date_input("Data Início", data_min, min_value=data_min, max_value=data_max)
 data_fim = st.sidebar.date_input("Data Fim", data_max, min_value=data_min, max_value=data_max)
 
-# Horário
 hora_inicio = st.sidebar.slider("Hora Início", 0, 23, 0)
 hora_fim = st.sidebar.slider("Hora Fim", 0, 23, 23)
 
-# Média móvel
 usar_media_movel = st.sidebar.checkbox("Aplicar média móvel na série temporal?", value=False)
 window_size = 3
 if usar_media_movel:
     window_size = st.sidebar.slider("Tamanho da janela da média móvel", min_value=2, max_value=10, value=3)
 
-# Filtro aplicado
 df_filtrado = df[
     (df['Estacao'].isin(estacoes_selecionadas)) &
     (df['Data'] >= pd.to_datetime(data_inicio)) &
@@ -119,7 +107,6 @@ if df_filtrado.empty:
     st.warning("🔍 Nenhum dado encontrado com os filtros selecionados.")
     st.stop()
 
-# --------- Layout Principal ---------
 st.title("🌤️ Dashboard Climático Avançado - Serra Gaúcha & Região")
 st.markdown(
     """
@@ -128,7 +115,7 @@ st.markdown(
     """
 )
 
-# Métricas principais - layout com cores e ícones
+# CORREÇÃO AQUI: colunas dinâmicas para métricas
 cols = st.columns(len(variaveis_selecionadas))
 for col, var in zip(cols, variaveis_selecionadas):
     media = df_filtrado[var].mean()
@@ -140,7 +127,6 @@ for col, var in zip(cols, variaveis_selecionadas):
         delta=f"Min: {minimo:.1f} | Max: {maximo:.1f}"
     )
 
-# --------- Série Temporal com múltiplas variáveis ---------
 st.subheader("📅 Evolução Temporal das Variáveis Selecionadas")
 
 df_plot = df_filtrado.copy()
@@ -169,7 +155,6 @@ fig_line.update_layout(
 
 st.plotly_chart(fig_line, use_container_width=True)
 
-# --------- Mapa Interpolado (Heatmap) ---------
 st.subheader("🌡️ Mapa Regional com Interpolação de Calor")
 
 df_media = df_filtrado.groupby('Estacao')[variaveis_selecionadas].mean().reset_index()
@@ -218,11 +203,9 @@ fig_heatmap.update_layout(
 
 st.plotly_chart(fig_heatmap, use_container_width=True)
 
-# --------- Visualização dos Dados ---------
 with st.expander("📋 Visualizar tabela de dados filtrados"):
     st.dataframe(df_filtrado)
 
-# --------- Download dos dados ---------
 st.sidebar.markdown("---")
 st.sidebar.download_button(
     label="⬇️ Baixar dados filtrados (CSV)",
@@ -231,7 +214,6 @@ st.sidebar.download_button(
     mime="text/csv"
 )
 
-# --------- Rodapé ---------
 st.markdown(
     """
     ---
