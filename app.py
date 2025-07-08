@@ -12,7 +12,7 @@ st.markdown("<h1 style='text-align: center; color: #6DD5FA;'>🌿 DASHBOARD CLIM
 
 @st.cache_data
 def carregar_dados():
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTco9UwrLAXMLNqYNzRIb4qLScsSKDbpuWDPDdXB9V_k5FPx2DxSoRxloRxEcWGV27jkB_wQ7HbNKLT/pub?output=xlsx"
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pubhtml"
     xls = pd.ExcelFile(url)
     dados = {}
     for nome in xls.sheet_names:
