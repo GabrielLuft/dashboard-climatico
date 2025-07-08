@@ -2,161 +2,146 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 from scipy.interpolate import griddata
-import pydeck as pdk
+import plotly.graph_objects as go
 
-# === Configuração inicial ===
-st.set_page_config(layout="wide", page_title="🌎 AgroDashboard | Clima Inteligente")
+st.set_page_config(layout="wide", page_title="🌦️ Painel Climático Fruticultura 4.0")
 
-st.markdown(
-    """
-    <style>
-        body {
-            background-color: #0d1117;
-            color: #c9d1d9;
-        }
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        h1, h2, h3 {
-            color: #58a6ff;
-        }
-        .css-1d391kg {
-            background-color: #161b22;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# ------------------- CONFIGURAÇÃO -------------------
 
-# === Função para carregar dados das abas (estações) ===
-@st.cache_data
-def carregar_estacoes():
-    estacoes = {
-        "Bento Gonçalves": "https://docs.google.com/spreadsheets/d/1V9s2JgyDUBitQ9eChSqrKQJ5GFG4NKHO_EOzHPm4dgA/export?format=csv&gid=1136868112",
-        "Caxias do Sul": "https://docs.google.com/spreadsheets/d/1V9s2JgyDUBitQ9eChSqrKQJ5GFG4NKHO_EOzHPm4dgA/export?format=csv&gid=1948457634",
-        "Garibaldi": "https://docs.google.com/spreadsheets/d/1V9s2JgyDUBitQ9eChSqrKQJ5GFG4NKHO_EOzHPm4dgA/export?format=csv&gid=651276718",
-        "Farroupilha": "https://docs.google.com/spreadsheets/d/1V9s2JgyDUBitQ9eChSqrKQJ5GFG4NKHO_EOzHPm4dgA/export?format=csv&gid=1776247071"
-    }
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQy6eF8XUYkb6IM1Rk2uDGKqg3A4eLHzm2Z_H6v9aNBgVDqaXZcf_yb1xYBoFvh3Q/pub?output=xlsx"
 
-    coordenadas = {
-        "Bento Gonçalves": (-29.1667, -51.5167),
-        "Caxias do Sul": (-29.1629, -51.1794),
-        "Garibaldi": (-29.2597, -51.5350),
-        "Farroupilha": (-29.2225, -51.3411)
-    }
+COORDENADAS_ESTACOES = {
+    "Bento Gonçalves": (-29.165, -51.518),
+    "Caxias do Sul": (-29.167, -51.179),
+    "Garibaldi": (-29.259, -51.534),
+    "Farroupilha": (-29.223, -51.341)
+}
 
-    dados = []
-    for cidade, url in estacoes.items():
-        try:
-            df = pd.read_csv(url)
-            df["Estacao"] = cidade
-            df["Lat"] = coordenadas[cidade][0]
-            df["Lon"] = coordenadas[cidade][1]
-            df["Data"] = pd.to_datetime(df["Data"], dayfirst=True, errors="coerce")
-            df["Hora"] = pd.to_datetime(df["Hora"], format="%H:%M:%S", errors="coerce").dt.time
-            dados.append(df)
-        except Exception as e:
-            st.warning(f"Erro ao carregar {cidade}: {e}")
-    return pd.concat(dados, ignore_index=True)
+# ------------------- FUNÇÕES -------------------
 
-# === Carregar os dados ===
-df = carregar_estacoes()
+@st.cache_data(ttl=3600)
+def carregar_dados():
+    xls = pd.ExcelFile(GOOGLE_SHEET_URL)
+    estacoes = {}
+    for nome in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=nome)
+        df = df.rename(columns=str.strip)
+        df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+        df = df.dropna(subset=['Data'])
+        df['Hora'] = pd.to_datetime(df['Hora'], format='%H:%M:%S', errors='coerce').dt.time
+        df['Estação'] = nome
+        estacoes[nome] = df
+    return pd.concat(estacoes.values(), ignore_index=True)
 
-# === Sidebar ===
-with st.sidebar:
-    st.image("https://img.icons8.com/external-flaticons-flat-flat-icons/512/external-climate-sustainability-flaticons-flat-flat-icons.png", width=150)
-    st.title("Painel Agroclimático 🌾")
-    estacoes_sel = st.multiselect("Selecione as Estações", options=sorted(df["Estacao"].unique()))
-    variaveis_sel = st.multiselect("Variáveis", ["Temperatura", "Umidade", "Chuva", "Radiação"])
-    data_ini = st.date_input("Data Início", df["Data"].min().date())
-    data_fim = st.date_input("Data Fim", df["Data"].max().date())
-    media_movel = st.slider("Média Móvel (horas)", 1, 48, 6)
+df = carregar_dados()
+variaveis_disponiveis = ['Temperatura', 'Umidade', 'Chuva', 'Radiação']
 
-# === Filtrar os dados ===
-df_filtrado = df[
-    (df["Estacao"].isin(estacoes_sel)) &
-    (df["Data"] >= pd.to_datetime(data_ini)) &
-    (df["Data"] <= pd.to_datetime(data_fim))
-].copy()
+# ------------------- SIDEBAR -------------------
 
-if df_filtrado.empty:
-    st.warning("Nenhum dado encontrado para o filtro selecionado.")
-    st.stop()
+st.sidebar.title("🔎 Filtros")
 
-# === Gráficos Temporais ===
-st.markdown("## 📈 Séries Temporais com Média Móvel")
+estacoes_selecionadas = st.sidebar.multiselect("Estações", options=df['Estação'].unique(), default=[])
+variaveis_selecionadas = st.sidebar.multiselect("Variáveis", options=variaveis_disponiveis, default=[])
+data_inicio = st.sidebar.date_input("Data Início", value=df['Data'].min().date())
+data_fim = st.sidebar.date_input("Data Fim", value=df['Data'].max().date())
+media_movel = st.sidebar.slider("Média Móvel (horas)", 1, 48, 6)
 
-for var in variaveis_sel:
-    fig = px.line()
-    for est in estacoes_sel:
-        df_est = df_filtrado[df_filtrado["Estacao"] == est]
-        df_est["MediaMovel"] = df_est[var].rolling(media_movel).mean()
-        fig.add_scatter(x=df_est["Data"], y=df_est["MediaMovel"], mode="lines", name=f"{est} - {var}")
-    fig.update_layout(
-        template="plotly_dark", 
-        height=400,
-        title=f"{var} | Média Móvel: {media_movel}h"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+# ------------------- FILTRO PRINCIPAL -------------------
 
-# === Boxplot Personalizado ===
-st.markdown("## 📊 Distribuição Estatística (Boxplot)")
-intervalo = st.radio("Intervalo", ["Dia", "Semana", "Mês"], horizontal=True)
+df_filtrado = df.copy()
 
-df_filtrado["Intervalo"] = df_filtrado["Data"].dt.to_period({
-    "Dia": "D", "Semana": "W", "Mês": "M"
-}[intervalo]).dt.start_time
+if estacoes_selecionadas:
+    df_filtrado = df_filtrado[df_filtrado['Estação'].isin(estacoes_selecionadas)]
+if variaveis_selecionadas:
+    df_filtrado = df_filtrado[[*['Data', 'Hora', 'Estação'], *variaveis_selecionadas]]
+df_filtrado = df_filtrado[(df_filtrado['Data'] >= pd.to_datetime(data_inicio)) & (df_filtrado['Data'] <= pd.to_datetime(data_fim))]
 
-for var in variaveis_sel:
-    fig_box = px.box(df_filtrado, x="Estacao", y=var, color="Estacao", points="all", template="plotly_dark")
-    fig_box.update_layout(title=f"{var} - Boxplot por {intervalo}")
+# ------------------- HEADER -------------------
+
+st.title("🌱 Painel Climático Inteligente para Fruticultura")
+st.markdown("Análise técnica dos parâmetros meteorológicos em tempo real com inteligência visual para tomada de decisão.")
+
+# ------------------- SÉRIE TEMPORAL -------------------
+
+st.subheader("📊 Gráficos de Séries Temporais")
+if not estacoes_selecionadas or not variaveis_selecionadas:
+    st.warning("Selecione ao menos uma estação e uma variável para visualizar os gráficos.")
+else:
+    for var in variaveis_selecionadas:
+        fig = px.line(df_filtrado, x='Data', y=var, color='Estação',
+                      title=f"Série Temporal de {var}", template="plotly_dark")
+        df_filtrado[f'{var}_MM'] = df_filtrado.groupby('Estação')[var].transform(lambda x: x.rolling(media_movel).mean())
+        fig.add_scatter(x=df_filtrado['Data'], y=df_filtrado[f'{var}_MM'], mode='lines', name='Média Móvel')
+        st.plotly_chart(fig, use_container_width=True)
+
+# ------------------- BOXPLOT -------------------
+
+st.subheader("🧪 Distribuição Estatística (Boxplot)")
+
+intervalo_box = st.radio("Intervalo:", ["Dia", "Semana", "Mês"], horizontal=True)
+
+df_box = df_filtrado.copy()
+if intervalo_box == "Dia":
+    df_box['Intervalo'] = df_box['Data'].dt.date
+elif intervalo_box == "Semana":
+    df_box['Intervalo'] = df_box['Data'].dt.to_period("W").apply(lambda r: r.start_time)
+else:
+    df_box['Intervalo'] = df_box['Data'].dt.to_period("M").apply(lambda r: r.start_time)
+
+for var in variaveis_selecionadas:
+    fig_box = px.box(df_box, x="Intervalo", y=var, color="Estação",
+                     title=f"Boxplot de {var} por {intervalo_box}", template="plotly_dark")
     st.plotly_chart(fig_box, use_container_width=True)
 
-# === Interpolação Espacial ===
-if len(estacoes_sel) >= 3:
-    st.markdown("## 🌐 Mapa de Calor Interpolado")
+# ------------------- INTERPOLAÇÃO EM MAPA -------------------
 
-    for var in variaveis_sel:
-        pontos = df_filtrado.dropna(subset=[var])[["Lat", "Lon", var]]
-        grid_lat, grid_lon = np.mgrid[
-            pontos["Lat"].min():pontos["Lat"].max():100j,
-            pontos["Lon"].min():pontos["Lon"].max():100j
-        ]
-        grid_valores = griddata(
-            pontos[["Lat", "Lon"]].values, 
-            pontos[var].values, 
-            (grid_lat, grid_lon), 
-            method="linear"
-        )
+st.subheader("🗺️ Mapa com Interpolação Geográfica")
 
-        fig_map = go.Figure(go.Contour(
-            z=grid_valores,
-            x=grid_lon[0], 
-            y=grid_lat[:,0],
-            colorscale="Viridis",
-            contours_coloring="heatmap",
-            colorbar_title=var
-        ))
-        fig_map.update_layout(
-            title=f"Mapa Interpolado: {var}",
-            height=500,
-            template="plotly_dark"
-        )
-        st.plotly_chart(fig_map, use_container_width=True)
+if len(estacoes_selecionadas) >= 3:
+    ultima_data = df_filtrado['Data'].max()
+    df_ultimas = df_filtrado[df_filtrado['Data'] == ultima_data].groupby('Estação').mean(numeric_only=True).reset_index()
+
+    pontos = []
+    for est in df_ultimas['Estação']:
+        if est in COORDENADAS_ESTACOES:
+            lat, lon = COORDENADAS_ESTACOES[est]
+            pontos.append((lat, lon))
+    if len(pontos) >= 3:
+        lats, lons = zip(*pontos)
+        for var in variaveis_selecionadas:
+            fig_map = go.Figure(data=go.Scattergeo(
+                lon=lons,
+                lat=lats,
+                text=df_ultimas[var].round(2),
+                marker=dict(
+                    size=18,
+                    color=df_ultimas[var],
+                    colorscale='YlOrRd',
+                    showscale=True,
+                    colorbar_title=var
+                )
+            ))
+            fig_map.update_layout(
+                geo_scope='south america',
+                title=f"{var} Interpolado nas Estações (Última Data)",
+                template='plotly_dark'
+            )
+            st.plotly_chart(fig_map, use_container_width=True)
 else:
-    st.info("⚠️ Pelo menos 3 estações devem ser selecionadas para gerar o mapa interpolado.")
+    st.info("Selecione ao menos 3 estações para visualizar o mapa interpolado.")
 
-# === Gráfico 3D ===
-st.markdown("## 🌐 Visualização 3D Avançada")
-for var in variaveis_sel:
-    fig3d = px.scatter_3d(df_filtrado, x="Data", y="Estacao", z=var, color="Estacao", template="plotly_dark")
-    fig3d.update_layout(title=f"{var} - Visualização 3D", height=500)
-    st.plotly_chart(fig3d, use_container_width=True)
+# ------------------- GRÁFICOS 3D -------------------
 
-# === Rodapé ===
+st.subheader("🔭 Visualização 3D Avançada")
+for var in variaveis_selecionadas:
+    fig_3d = px.scatter_3d(df_filtrado, x="Data", y="Estação", z=var,
+                           color=var, title=f"{var} em 3D", template="plotly_dark")
+    st.plotly_chart(fig_3d, use_container_width=True)
+
+# ------------------- RODAPÉ -------------------
+
 st.markdown("---")
-st.markdown("🛰️ Desenvolvido por Gabriel Luft | Projeto de monitoramento climático para agricultura de precisão.")
+st.markdown("📍 Desenvolvido por Gabriel Luft | Aplicação voltada ao monitoramento climático técnico para **Fruticultura de Precisão**.")
+
