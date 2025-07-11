@@ -1,99 +1,99 @@
+
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 from scipy.interpolate import griddata
-import numpy as np
+import urllib.request
 
-st.set_page_config(layout="wide", page_title="Dashboard Climático Vitícola", page_icon="🌱")
+st.set_page_config(page_title="🌐 AgriClim: Painel Climático Avançado", layout="wide")
 
-st.markdown("<h1 style='text-align: center; color: #6DD5FA;'>🌿 DASHBOARD CLIMÁTICO PARA VITICULTURA 🌿</h1>", unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    h1, h2, h3, h4, h5, h6 {
+        color: #00FFAA;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    .stApp {
+        background: linear-gradient(145deg, #0a0f1c, #1c2230);
+        color: #ffffff;
+    }
+    .block-container {
+        padding-top: 2rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🌐 AgriClim: Painel Climático para a Fruticultura de Precisão")
 
 @st.cache_data
 def carregar_dados():
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pubhtml"
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTq6tpKNUY9gh5NENY9E1Iq_QHOtrKocgvUJ7snqV7fGwbSRQ1z6Ke7a5AgGiJH3Xk3Yq4_j4R6sbi_/pub?output=xlsx"
     xls = pd.ExcelFile(url)
-    dados = {}
-    for nome in xls.sheet_names:
-        df = xls.parse(nome)
-        if 'Data' in df.columns and 'Hora' in df.columns:
-            df['Data_Hora'] = pd.to_datetime(df['Data'].astype(str) + ' ' + df['Hora'].astype(str), errors='coerce')
-            df['Estação'] = nome
-            df = df.dropna(subset=['Data_Hora'])
-            dados[nome] = df
-    return pd.concat(dados.values(), ignore_index=True)
+    df_total = []
+    for sheet in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=sheet)
+        if 'Data' in df.columns:
+            df['Estação'] = sheet
+            df_total.append(df)
+    return pd.concat(df_total, ignore_index=True)
 
 df = carregar_dados()
+df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+df = df.dropna(subset=['Data'])
 
-# Filtros
-with st.sidebar:
-    st.markdown("### ⏱️ Intervalo de Visualização")
-    data_min = df['Data_Hora'].min().date()
-    data_max = df['Data_Hora'].max().date()
-    data_inicio = st.date_input("Data Início", data_min, min_value=data_min, max_value=data_max)
-    data_fim = st.date_input("Data Fim", data_max, min_value=data_min, max_value=data_max)
-    janela_media = st.slider("🧮 Janela da Média Móvel (dias)", 1, 30, 7)
+st.sidebar.header("🎛️ Filtros")
+estacoes = sorted(df['Estação'].unique())
+variaveis = [col for col in df.columns if col not in ['Data', 'Estação']]
 
-    st.markdown("### 🛰️ Estações")
-    estacoes = st.multiselect("Selecione as Estações", df['Estação'].unique(), default=[])
+estacoes_sel = st.sidebar.multiselect("Selecionar Estações", estacoes)
+variaveis_sel = st.sidebar.multiselect("Selecionar Variáveis", variaveis)
+data_inicio = st.sidebar.date_input("Data Início", df['Data'].min().date())
+data_fim = st.sidebar.date_input("Data Fim", df['Data'].max().date())
+media_movel = st.sidebar.slider("Média Móvel (dias)", 1, 30, 7)
 
-    st.markdown("### 📈 Variáveis")
-    variaveis = st.multiselect("Selecione as Variáveis", ['Temperatura', 'Umidade', 'Chuva', 'Radiação'], default=[])
+if estacoes_sel and variaveis_sel:
+    df_filtrado = df[(df['Estação'].isin(estacoes_sel)) & 
+                     (df['Data'].between(pd.to_datetime(data_inicio), pd.to_datetime(data_fim)))]
 
-# Filtro principal
-df_filtrado = df[
-    (df['Data_Hora'].dt.date >= data_inicio) &
-    (df['Data_Hora'].dt.date <= data_fim)
-]
-if estacoes:
-    df_filtrado = df_filtrado[df_filtrado['Estação'].isin(estacoes)]
-if variaveis:
-    st.markdown("## 📊 Análise Temporal das Variáveis Selecionadas")
-    for var in variaveis:
-        fig = px.line(df_filtrado, x='Data_Hora', y=var, color='Estação', title=f'{var} ao Longo do Tempo')
-        fig.update_traces(mode='lines+markers')
+    st.subheader("📈 Séries Temporais com Média Móvel")
+    for var in variaveis_sel:
+        fig = px.line(df_filtrado, x='Data', y=df_filtrado[var].rolling(media_movel).mean(),
+                      color='Estação', labels={"value": var}, title=f"Média Móvel de {var}")
+        fig.update_layout(template="plotly_dark")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("## 📦 Boxplot por Estação")
-    for var in variaveis:
-        fig_box = px.box(df_filtrado, x='Estação', y=var, points="all", title=f'Distribuição de {var}')
+    st.subheader("📊 Box Plot - Distribuição por Estação")
+    for var in variaveis_sel:
+        fig_box = px.box(df_filtrado, x="Estação", y=var, points="all", color="Estação", title=f"Distribuição de {var}")
+        fig_box.update_layout(template="plotly_dark")
         st.plotly_chart(fig_box, use_container_width=True)
 
-    st.markdown("## 🗺️ Interpolação Espacial das Estações (Temperatura)")
-    coordenadas = {
-        'Bento Gonçalves': (-29.165, -51.518),
-        'Caxias do Sul': (-29.168, -51.179),
-        'Garibaldi': (-29.256, -51.535),
-        'Farroupilha': (-29.223, -51.341)
-    }
+    if len(estacoes_sel) >= 3:
+        st.subheader("🌡️ Interpolação de Calor (Mapa)")
+        coords = {
+            "Bento Gonçalves": (-29.1667, -51.5167),
+            "Caxias do Sul": (-29.1667, -51.1833),
+            "Garibaldi": (-29.2597, -51.5333),
+            "Farroupilha": (-29.2225, -51.3478)
+        }
+        pontos = []
+        for est in estacoes_sel:
+            if est in coords:
+                lat, lon = coords[est]
+                media = df_filtrado[df_filtrado["Estação"] == est][variaveis_sel[0]].mean()
+                pontos.append((lat, lon, media))
+        if len(pontos) >= 3:
+            lats, lons, values = zip(*pontos)
+            grid_lat, grid_lon = np.mgrid[min(lats):max(lats):100j, min(lons):max(lons):100j]
+            grid_val = griddata((lats, lons), values, (grid_lat, grid_lon), method="cubic")
 
-    pontos = []
-    valores = []
-    for est in estacoes:
-        if est in coordenadas:
-            lat, lon = coordenadas[est]
-            df_est = df_filtrado[df_filtrado['Estação'] == est]
-            if not df_est.empty:
-                media = df_est['Temperatura'].mean()
-                pontos.append((lat, lon))
-                valores.append(media)
-
-    if len(pontos) >= 3:
-        latitudes, longitudes = zip(*pontos)
-        grid_lat, grid_lon = np.mgrid[min(latitudes):max(latitudes):100j, min(longitudes):max(longitudes):100j]
-        grid_temp = griddata(pontos, valores, (grid_lat, grid_lon), method='cubic')
-
-        fig_mapa = go.Figure(data=go.Contour(
-            z=grid_temp,
-            x=grid_lon[0], y=grid_lat[:,0],
-            colorscale='Viridis',
-            contours_coloring='heatmap'
-        ))
-        fig_mapa.update_layout(title='Mapa de Calor Interpolado - Temperatura')
-        st.plotly_chart(fig_mapa, use_container_width=True)
-    else:
-        st.warning("Selecione pelo menos 3 estações para gerar a interpolação espacial.")
-
+            fig_map = go.Figure(data=go.Heatmap(z=grid_val, x=grid_lon[0], y=grid_lat[:,0], colorscale="Viridis"))
+            fig_map.update_layout(title=f"Interpolação de {variaveis_sel[0]} nas Estações", template="plotly_dark")
+            st.plotly_chart(fig_map, use_container_width=True)
+        else:
+            st.info("🔔 Selecione pelo menos 3 estações com coordenadas para interpolar no mapa.")
 else:
-    st.info("👈 Selecione estações e variáveis para visualizar os dados.")
+    st.warning("Por favor, selecione ao menos uma estação e uma variável.")
