@@ -2,7 +2,5 @@ streamlit
 pandas
 numpy
 plotly
-gspread
-oauth2client
 scikit-learn
 geopy

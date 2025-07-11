@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,19 +8,17 @@ from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime
 from geopy.distance import geodesic
 
-# --- CONFIGURAÇÕES ---
-
 CSV_LINKS = {
-    "Estacao1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=0",
-    # Adicione outros links CSV aqui...
+    "Estacao1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=1136868112",
+    "Estacao2": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=1948457634",
+    "Estacao3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=651276718",
+    "Estacao4": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=1776247071"
 }
 
 EXPECTED_COLUMNS = ['Data', 'Temperatura_Min', 'Temperatura_Med', 'Temperatura_Max',
                     'Chuva_mm', 'Umidade_Relativa', 'Vento', 'Latitude', 'Longitude']
 
 RADAR_VARS = ['Temperatura_Min', 'Temperatura_Med', 'Temperatura_Max', 'Chuva_mm', 'Umidade_Relativa']
-
-# --- FUNÇÕES ---
 
 @st.cache_data(ttl=3600)
 def carregar_dados(csv_links):
@@ -112,7 +111,6 @@ def detectar_anomalias(df, var='Temperatura_Med', threshold=3):
 def encontrar_estacao_proxima(lat_user, lon_user, dfs):
     estacoes = []
     for nome, df in dfs.items():
-        # Pega latitude e longitude da última data
         df_sorted = df.sort_values('Data')
         lat = df_sorted['Latitude'].iloc[-1]
         lon = df_sorted['Longitude'].iloc[-1]
@@ -139,32 +137,10 @@ def plot_map_thermal(dfs):
                             title="Mapa térmico interpolado de Temperatura Média")
     return fig
 
-# --- INTERFACE ---
-
 def main():
     st.set_page_config(page_title="Dashboard Climático Interativo", layout="wide", page_icon="🌦️")
 
-    # Estilo CSS para fundo escuro e fontes modernas
-    st.markdown(
-        """
-        <style>
-        .main {
-            background: linear-gradient(135deg, #1e1e2f, #28313f);
-            color: #d0d0d0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .css-1d391kg {
-            background-color: transparent;
-        }
-        .css-ffhzg2 {
-            color: #00bcd4 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.title("Dashboard Climático Interativo - Versão com Geolocalização e Mapa")
+    st.title("Dashboard Climático Interativo - Geolocalização + Mapa")
 
     dfs = carregar_dados(CSV_LINKS)
 
