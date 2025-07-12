@@ -1,6 +1,10 @@
 streamlit
+gspread
+oauth2client
 pandas
 numpy
 plotly
-scikit-learn
 geopy
+streamlit-folium
+openpyxl
+xlrd

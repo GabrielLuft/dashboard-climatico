@@ -1,193 +1,140 @@
+# app.py
+# Dashboard Climático Interativo - Streamlit + Google Sheets + Mapbox
+# Desenvolvido por Gabriel Luft com suporte técnico do ChatGPT
 
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
-from sklearn.preprocessing import MinMaxScaler
+import plotly.express as px
+import folium
+from streamlit_folium import folium_static
 from datetime import datetime
-from geopy.distance import geodesic
+from utils import (
+    carregar_dados_estacoes,
+    localizar_estacao_proxima,
+    heatmap_temporal,
+    radar_chart_comparativo,
+    exportar_excel,
+    mapa_interpolado,
+    boxplot_temporal,
+    espaguete_3d
+)
 
-CSV_LINKS = {
-    "Estacao1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=1136868112",
-    "Estacao2": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=1948457634",
-    "Estacao3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=651276718",
-    "Estacao4": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR9AdILQ93f2IDMadcvHS5SK29o3fanNPDUrMA-QkV55XyrBmr8TdoFtu6h58FtSRrLFVupUmO5DrrG/pub?output=csv&gid=1776247071"
+# ========== CONFIGURAÇÕES INICIAIS ========== #
+st.set_page_config(
+    page_title="Dashboard Climático RS",
+    layout="wide",
+    page_icon="🌦️"
+)
+
+with open("style.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+st.markdown("# 🌦️ Dashboard Climático do Rio Grande do Sul")
+st.markdown("Visualização interativa e futurista dos dados meteorológicos registrados por estações automáticas.")
+
+# ========== CARREGAMENTO DOS DADOS ========== #
+with st.spinner("🔄 Carregando dados das estações..."):
+    estacoes = carregar_dados_estacoes()
+
+# ========== SIDEBAR: FILTROS ========== #
+st.sidebar.title("🔧 Filtros")
+st.sidebar.markdown("📍 Geolocalização (simulada para testes)")
+
+lat_user = st.sidebar.number_input("Latitude", value=-29.16)
+lon_user = st.sidebar.number_input("Longitude", value=-51.52)
+
+# Coordenadas das estações
+estacoes_coords = {
+    "Garibaldi": (-29.2597, -51.5352),
+    "Bento Gonçalves": (-29.1667, -51.5167),
+    "Farroupilha": (-29.2222, -51.3419),
+    "Monte Belo": (-29.1500, -51.6000)
 }
 
-EXPECTED_COLUMNS = ['Data', 'Temperatura_Min', 'Temperatura_Med', 'Temperatura_Max',
-                    'Chuva_mm', 'Umidade_Relativa', 'Vento', 'Latitude', 'Longitude']
+estacao_proxima = localizar_estacao_proxima(lat_user, lon_user, estacoes_coords)
+st.sidebar.success(f"📡 Estação mais próxima: {estacao_proxima}")
 
-RADAR_VARS = ['Temperatura_Min', 'Temperatura_Med', 'Temperatura_Max', 'Chuva_mm', 'Umidade_Relativa']
+estacoes_nomes = list(estacoes.keys())
+estacao_sel = st.sidebar.selectbox("Estação", estacoes_nomes, index=estacoes_nomes.index(estacao_proxima))
 
-@st.cache_data(ttl=3600)
-def carregar_dados(csv_links):
-    dados = {}
-    for nome, url in csv_links.items():
-        try:
-            df = pd.read_csv(url)
-            if 'Data' in df.columns:
-                df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
-                df.dropna(subset=['Data'], inplace=True)
-            else:
-                st.warning(f"Coluna 'Data' não encontrada na estação {nome}")
-                continue
+data_inicio = st.sidebar.date_input("Data inicial", datetime(2024, 1, 1))
+data_fim = st.sidebar.date_input("Data final", datetime.today())
 
-            missing_cols = [col for col in EXPECTED_COLUMNS if col not in df.columns]
-            if missing_cols:
-                st.warning(f"Colunas faltantes na estação {nome}: {missing_cols}")
-                continue
+# ========== FILTRO DE DADOS ========== #
+df = estacoes[estacao_sel]
+df["Data"] = pd.to_datetime(df["Data"])
+df_filtro = df[(df["Data"] >= pd.to_datetime(data_inicio)) & (df["Data"] <= pd.to_datetime(data_fim))].copy()
 
-            dados[nome] = df
-        except Exception as e:
-            st.error(f"Erro ao carregar dados da estação {nome}: {e}")
-    return dados
+# ========== ABA PRINCIPAL ========== #
+abas = st.tabs([
+    "📈 Candlestick", 
+    "🌡️ Heatmap", 
+    "📊 Radar Comparativo", 
+    "🧊 Boxplot Temporal", 
+    "🌍 Mapa Interpolado", 
+    "📉 Espaguete 3D", 
+    "📤 Exportar Excel"
+])
 
-def plot_media_movel(df, dias=7):
-    df_sorted = df.sort_values('Data')
-    df_sorted['Temp_Med_Media_Movel'] = df_sorted['Temperatura_Med'].rolling(window=dias).mean()
-    fig = px.line(df_sorted, x='Data', y=['Temperatura_Med', 'Temp_Med_Media_Movel'],
-                  title=f"Temperatura Média e Média Móvel {dias} dias",
-                  labels={'value': 'Temperatura (°C)', 'variable': 'Legenda'})
-    return fig
+# ========== CANDLESTICK ========== #
+with abas[0]:
+    st.subheader("📈 Candlestick Climático (Temp Mín / Méd / Máx)")
+    fig_candle = go.Figure(data=[
+        go.Candlestick(
+            x=df_filtro['Data'],
+            open=df_filtro['Temp_Med'],
+            high=df_filtro['Temp_Max'],
+            low=df_filtro['Temp_Min'],
+            close=df_filtro['Temp_Med'],
+            increasing_line_color='red',
+            decreasing_line_color='blue'
+        )
+    ])
+    fig_candle.update_layout(height=400, margin=dict(t=30, b=30))
+    st.plotly_chart(fig_candle, use_container_width=True)
 
-def plot_boxplot(df, intervalo='Dia'):
-    df = df.copy()
-    if intervalo == 'Dia':
-        df['Periodo'] = df['Data'].dt.date
-    elif intervalo == 'Semana':
-        df['Periodo'] = df['Data'].dt.to_period('W').apply(lambda r: r.start_time)
-    else:
-        df['Periodo'] = df['Data'].dt.to_period('M').apply(lambda r: r.start_time)
-    fig = px.box(df, x='Periodo', y='Temperatura_Med', points='all',
-                 title=f"Boxplot Temperatura Média por {intervalo}")
-    return fig
+# ========== HEATMAP ========== #
+with abas[1]:
+    st.subheader("🌡️ Heatmap Temporal por Hora e Dia")
+    fig_heatmap = heatmap_temporal(df_filtro)
+    st.plotly_chart(fig_heatmap, use_container_width=True)
 
-def plot_candlestick(df):
-    df_sorted = df.sort_values('Data')
-    fig = go.Figure(data=[go.Candlestick(
-        x=df_sorted['Data'],
-        open=df_sorted['Temperatura_Min'],
-        high=df_sorted['Temperatura_Max'],
-        low=df_sorted['Temperatura_Min'],
-        close=df_sorted['Temperatura_Med'],
-        increasing_line_color='green',
-        decreasing_line_color='red'
-    )])
-    fig.update_layout(title="Candlestick Climático",
-                      xaxis_title="Data",
-                      yaxis_title="Temperatura (°C)")
-    return fig
+# ========== RADAR CHART ========== #
+with abas[2]:
+    st.subheader("📊 Comparativo entre Estações (Radar Chart)")
+    fig_radar = radar_chart_comparativo(estacoes)
+    st.plotly_chart(fig_radar, use_container_width=True)
 
-def plot_radar_chart(dfs, labels):
-    scaler = MinMaxScaler()
-    radar_data = []
-    for df in dfs:
-        mean_vals = df[RADAR_VARS].mean().values.reshape(1, -1)
-        scaled = scaler.fit_transform(mean_vals)[0]
-        radar_data.append(scaled)
-    categories = RADAR_VARS
-    fig = go.Figure()
-    for i, data in enumerate(radar_data):
-        fig.add_trace(go.Scatterpolar(
-            r=data,
-            theta=categories,
-            fill='toself',
-            name=labels[i]
-        ))
-    fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0,1])),
-        showlegend=True,
-        title="Radar Chart: Comparação entre Estações"
+# ========== BOXPLOT ========== #
+with abas[3]:
+    st.subheader("🧊 Boxplot da Temperatura por Semana")
+    fig_box = boxplot_temporal(df_filtro)
+    st.plotly_chart(fig_box, use_container_width=True)
+
+# ========== MAPA INTERPOLADO ========== #
+with abas[4]:
+    st.subheader("🌍 Interpolação Térmica (Mapbox/Folium)")
+    mapa = mapa_interpolado(estacoes_coords, estacoes)
+    folium_static(mapa)
+
+# ========== ESPAGUETE 3D ========== #
+with abas[5]:
+    st.subheader("📉 Espaguete 3D das Temperaturas")
+    fig_3d = espaguete_3d(df_filtro)
+    st.plotly_chart(fig_3d, use_container_width=True)
+
+# ========== EXPORTAÇÃO PARA EXCEL ========== #
+with abas[6]:
+    st.subheader("📤 Exportar Dados Filtrados")
+    excel_data = exportar_excel(df_filtro)
+    st.download_button(
+        label="📥 Baixar Excel",
+        data=excel_data,
+        file_name=f"Dados_{estacao_sel}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    return fig
 
-def detectar_anomalias(df, var='Temperatura_Med', threshold=3):
-    df = df.copy()
-    df['z_score'] = (df[var] - df[var].mean()) / df[var].std()
-    anomalias = df[np.abs(df['z_score']) > threshold]
-    return anomalias
-
-def encontrar_estacao_proxima(lat_user, lon_user, dfs):
-    estacoes = []
-    for nome, df in dfs.items():
-        df_sorted = df.sort_values('Data')
-        lat = df_sorted['Latitude'].iloc[-1]
-        lon = df_sorted['Longitude'].iloc[-1]
-        dist = geodesic((lat_user, lon_user), (lat, lon)).km
-        estacoes.append((nome, dist))
-    estacoes.sort(key=lambda x: x[1])
-    return estacoes[0][0] if estacoes else None
-
-def plot_map_thermal(dfs):
-    df_map = pd.DataFrame()
-    for nome, df in dfs.items():
-        last = df.sort_values('Data').iloc[-1]
-        df_map = pd.concat([df_map, pd.DataFrame({
-            'Estacao': [nome],
-            'Lat': [last['Latitude']],
-            'Lon': [last['Longitude']],
-            'Temp_Med': [last['Temperatura_Med']]
-        })])
-    fig = px.scatter_mapbox(df_map, lat='Lat', lon='Lon', color='Temp_Med',
-                            size='Temp_Med', color_continuous_scale='thermal',
-                            size_max=15, zoom=5,
-                            mapbox_style='carto-darkmatter',
-                            hover_name='Estacao',
-                            title="Mapa térmico interpolado de Temperatura Média")
-    return fig
-
-def main():
-    st.set_page_config(page_title="Dashboard Climático Interativo", layout="wide", page_icon="🌦️")
-
-    st.title("Dashboard Climático Interativo - Geolocalização + Mapa")
-
-    dfs = carregar_dados(CSV_LINKS)
-
-    if not dfs:
-        st.error("Nenhum dado válido carregado. Verifique os links CSV.")
-        st.stop()
-
-    st.sidebar.header("Configurações")
-
-    detectar_auto = st.sidebar.checkbox("Detectar estação mais próxima automaticamente", value=True)
-
-    lat_user = st.sidebar.number_input("Latitude sua localização", value=-29.169, format="%.6f")
-    lon_user = st.sidebar.number_input("Longitude sua localização", value=-51.528, format="%.6f")
-
-    if detectar_auto:
-        estacao_selecionada = encontrar_estacao_proxima(lat_user, lon_user, dfs)
-        st.sidebar.success(f"Estação detectada: {estacao_selecionada}")
-    else:
-        estacao_selecionada = st.sidebar.selectbox("Escolha a estação", list(dfs.keys()))
-
-    df_estacao = dfs.get(estacao_selecionada)
-
-    if df_estacao is None or df_estacao.empty:
-        st.error("Dados da estação selecionada não encontrados ou vazios.")
-        st.stop()
-
-    st.subheader(f"Dados da estação: {estacao_selecionada}")
-    st.dataframe(df_estacao.head())
-
-    st.plotly_chart(plot_media_movel(df_estacao), use_container_width=True)
-
-    intervalo = st.selectbox("Intervalo para boxplot", ['Dia', 'Semana', 'Mês'])
-    st.plotly_chart(plot_boxplot(df_estacao, intervalo), use_container_width=True)
-
-    st.plotly_chart(plot_candlestick(df_estacao), use_container_width=True)
-
-    st.subheader("Comparação entre Estações (Radar Chart)")
-    st.plotly_chart(plot_radar_chart(list(dfs.values()), list(dfs.keys())), use_container_width=True)
-
-    st.subheader("Mapa térmico interpolado")
-    st.plotly_chart(plot_map_thermal(dfs), use_container_width=True)
-
-    st.subheader("Análise de Anomalias")
-    threshold = st.slider("Threshold Z-score para outliers", 1.0, 5.0, 3.0, 0.1)
-    anomalias = detectar_anomalias(df_estacao, threshold=threshold)
-    st.write(f"Quantidade de dados fora do esperado (|z| > {threshold}): {len(anomalias)}")
-    st.dataframe(anomalias[['Data', 'Temperatura_Med', 'z_score']])
-
-if __name__ == "__main__":
-    main()
+# ========== RODAPÉ ========== #
+st.markdown("---")
+st.markdown("Aplicativo desenvolvido com ❤️ por Gabriel Luft • Dados meteorológicos via Google Sheets • Visualizações com Plotly e Folium.")
